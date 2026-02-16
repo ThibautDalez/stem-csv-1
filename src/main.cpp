@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 
 
-
+//amperemeter deel
 /*!
    file getVoltageCurrentPower.ino
    SEN0291 Gravity: I2C Digital Wattmeter
@@ -27,10 +27,11 @@ DFRobot_INA219_IIC     ina219(&Wire, INA219_I2C_ADDRESS4);
 float ina219Reading_mA = 1000;
 float extMeterReading_mA = 1000;
 
-#define R 9
-#define G 10
-#define B 11
 
+
+
+
+//EEPROM-deel
 // === EEPROM-adres === (permanent geheugen)
 #define EEPROM_ADDR 0
 
@@ -47,7 +48,6 @@ unsigned long lastEEPROMWriteMillis = 0;
 // Intervallen in milliseconden
 const unsigned long SAMPLE_INTERVAL = 1000;   // 1s
 const unsigned long EEPROM_INTERVAL = 60000;  // 60s
-
 
 // Functie om cumulatieve stroomgegevens uit EEPROM te laden (zo wordt het vorige totaal hersteld na een reset of stroomuitval)
 void loadStatsFromEEPROM() {
@@ -68,6 +68,14 @@ void saveStatsToEEPROM() {
   EEPROM.put(EEPROM_ADDR, stats);
   Serial.println("Stats opgeslagen in EEPROM");
 }
+
+
+
+
+//schema-deel
+#define R 9
+#define G 10
+#define B 11
 
 // === CONSTANTEN ===
 const int NUM_DAYS = 14;
@@ -106,7 +114,7 @@ int startMinute = 0;
 
 
 void setup() {
-
+  // eventueel oude EEPROM-statistieken inladen
   loadStatsFromEEPROM();
 
   pinMode(R, OUTPUT);
@@ -117,6 +125,7 @@ void setup() {
   while(!Serial);
   
   Serial.println();
+  // INA219 initialiseren, kijken of hij reageert, en kalibreren
   while(ina219.begin() != true) {
       Serial.println("INA219 begin faild");
       delay(2000);
@@ -189,7 +198,7 @@ void loop() {
   analogWrite(G, currentColor.g);
   analogWrite(B, currentColor.b);
 
-
+  // Print stroommetingen naar Serial, ter controle van de werking van de INA219
   Serial.print("BusVoltage:   ");
   Serial.print(ina219.getBusVoltage_V(), 2);
   Serial.println("V");
@@ -204,31 +213,32 @@ void loop() {
   Serial.println("mW");
   Serial.println("");
 
+  //EEPROM-deel
   unsigned long nowMillis = millis();
 
-// 1x per seconde meten en cumulatieve stroomgegevens bijwerken
-if (nowMillis - lastSampleMillis >= SAMPLE_INTERVAL) {
-  lastSampleMillis = nowMillis;
+  // 1x per seconde meten en cumulatieve stroomgegevens bijwerken
+  if (nowMillis - lastSampleMillis >= SAMPLE_INTERVAL) {
+    lastSampleMillis = nowMillis;
 
-  float current_mA = ina219.getCurrent_mA();
+    float current_mA = ina219.getCurrent_mA();
 
-  stats.currentSum_mA += current_mA;
-  stats.totalSeconds++;
-}
+    stats.currentSum_mA += current_mA;
+    stats.totalSeconds++;
+  }
 
-// 1x per minuut cumulatieve stroomgegevens naar EEPROM schrijven
-if (nowMillis - lastEEPROMWriteMillis >= EEPROM_INTERVAL) {
-  lastEEPROMWriteMillis = nowMillis;
-  saveStatsToEEPROM();
-}
+  // 1x per minuut cumulatieve stroomgegevens naar EEPROM schrijven
+  if (nowMillis - lastEEPROMWriteMillis >= EEPROM_INTERVAL) {
+    lastEEPROMWriteMillis = nowMillis;
+    saveStatsToEEPROM();
+  }
 
-// Gemiddelde stroom berekenen en printen
-if (stats.totalSeconds > 0) {
-  double avgCurrent = stats.currentSum_mA / stats.totalSeconds;
+  // Gemiddelde stroom berekenen en printen
+  if (stats.totalSeconds > 0) {
+    double avgCurrent = stats.currentSum_mA / stats.totalSeconds;
 
-  Serial.print("Gemiddelde stroom (mA): ");
-  Serial.println(avgCurrent, 2);
-}
+    Serial.print("Gemiddelde stroom (mA): ");
+    Serial.println(avgCurrent, 2);
+  }
 
   delay(500);
 }
