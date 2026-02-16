@@ -2,6 +2,8 @@
 #include <Wire.h>
 #include "DFRobot_INA219.h"
 #include <EEPROM.h>
+#include <FastLED.h>
+
 
 
 //amperemeter deel
@@ -73,10 +75,9 @@ void saveStatsToEEPROM() {
 
 
 //schema-deel
-#define R 9
-#define G 10
-#define B 11
-
+#define DATA_PIN 3
+#define NUM_LEDS 16 // Hoeveel leds in je strip?
+CRGB leds[NUM_LEDS]; // Definieer de array van leds
 // === CONSTANTEN ===
 const int NUM_DAYS = 14;
 const unsigned long DAY_DURATION = 24UL * 60UL * 60UL * 1000UL;
@@ -91,7 +92,6 @@ struct ColorTime {
   int g;
   int b;
 };
-
 
 ColorTime schedule[] = {
   {0, 17, 30, 255, 0, 0},   
@@ -117,9 +117,7 @@ void setup() {
   // eventueel oude EEPROM-statistieken inladen
   loadStatsFromEEPROM();
 
-  pinMode(R, OUTPUT);
-  pinMode(G, OUTPUT);
-  pinMode(B, OUTPUT);
+  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS); // Initialiseer de LED-strip
   Serial.begin(9600);
 
   while(!Serial);
@@ -194,9 +192,11 @@ void loop() {
   }
 
   // Zet LED naar huidige kleur
-  analogWrite(R, currentColor.r);
-  analogWrite(G, currentColor.g);
-  analogWrite(B, currentColor.b);
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    leds[i] = CRGB(currentColor.r, currentColor.g, currentColor.b);
+  }
+  FastLED.show();
 
   // Print stroommetingen naar Serial, ter controle van de werking van de INA219
   Serial.print("BusVoltage:   ");
