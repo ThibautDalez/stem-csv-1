@@ -33,7 +33,7 @@ float extMeterReading_mA = 1000;
 
 // Struct voor het opslaan van cumulatieve stroomgegevens
 struct PowerStats {
-  uint32_t totalMilliSeconds;
+  uint32_t totalMeasurements;
   double currentSum_mA;
 };
 
@@ -57,13 +57,13 @@ void loadStatsFromEEPROM() {
   EEPROM.get(EEPROM_ADDR, stats);
 
   // Eerste keer of corrupte data
-  if (stats.totalMilliSeconds == 0xFFFFFFFF) {
-    stats.totalMilliSeconds = 0;
+  if (stats.totalMeasurements == 0xFFFFFFFF) {
+    stats.totalMeasurements = 0;
     stats.currentSum_mA = 0.0;
   }
 
   Serial.print("Herstelde runtime (ms): ");
-  Serial.println(stats.totalMilliSeconds);
+  Serial.println(stats.totalMeasurements);
 }
 
 // Functie om cumulatieve stroomgegevens naar EEPROM te schrijven (zo blijft het totaal behouden bij een reset of stroomuitval)
@@ -240,7 +240,7 @@ void loop() {
     float current_mA = ina219.getCurrent_mA();
 
     stats.currentSum_mA += current_mA;
-    stats.totalMilliSeconds += currentMillis - previousMillisCurrentSample;
+    stats.totalMeasurements++;
   }
 
   // 1x per 10 minuut cumulatieve stroomgegevens naar EEPROM schrijven
@@ -253,8 +253,8 @@ void loop() {
   // Gemiddelde stroom berekenen en printen
   currentMillis = millis();
   if (currentMillis - previousMillisPrintAVGCurrent >= INTERVAL_PRINT_AVG_CURRENT) {
-    if (stats.totalMilliSeconds > 0) {
-      double avgCurrent = stats.currentSum_mA / stats.totalMilliSeconds * 1000.0;
+    if (stats.totalMeasurements > 0) {
+      double avgCurrent = stats.currentSum_mA / stats.totalMeasurements;
 
       Serial.print("Gemiddelde stroom (mA): ");
       Serial.println(avgCurrent, 2);
