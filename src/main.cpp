@@ -4,8 +4,6 @@
 #include <EEPROM.h>
 #include <FastLED.h>
 
-
-
 //amperemeter deel
 /*!
    file getVoltageCurrentPower.ino
@@ -29,40 +27,43 @@ DFRobot_INA219_IIC     ina219(&Wire, INA219_I2C_ADDRESS4);
 float ina219Reading_mA = 1000;
 float extMeterReading_mA = 1000;
 
-
-
-
-
 //EEPROM-deel
 // === EEPROM-adres === (permanent geheugen)
 #define EEPROM_ADDR 0
 
 // Struct voor het opslaan van cumulatieve stroomgegevens
 struct PowerStats {
-  uint32_t totalSeconds;
-    double currentSum_mA;
+  uint32_t totalMeasurements;
+  double currentSum_mA;
 };
 
 PowerStats stats; // Variabele om de cumulatieve stroomgegevens bij te houden
 // Variabelen voor timing
-unsigned long lastSampleMillis = 0;
-unsigned long lastEEPROMWriteMillis = 0;
+unsigned long currentMillis = 0;
+unsigned long previousMillisColorChange = 0;
+unsigned long previousMillisPrintMeasurement = 0;
+unsigned long previousMillisCurrentSample = 0;
+unsigned long previousMillisWriteEeprom = 0;
+unsigned long previousMillisPrintAVGCurrent = 0;
 // Intervallen in milliseconden
-const unsigned long SAMPLE_INTERVAL = 1000;   // 1s
-const unsigned long EEPROM_INTERVAL = 60000;  // 60s
+const unsigned long INTERVAL_COLOR_CHANGE = 60000;
+const unsigned long INTERVAL_PRINT_MEAS = 10000;
+const unsigned long INTERVAL_CURRENT_SAMPLE = 1000;   // 1s
+const unsigned long INTERVAL_WRITE_EEPROM = 600000;  // 600s
+const unsigned long INTERVAL_PRINT_AVG_CURRENT = 10000;
 
 // Functie om cumulatieve stroomgegevens uit EEPROM te laden (zo wordt het vorige totaal hersteld na een reset of stroomuitval)
 void loadStatsFromEEPROM() {
   EEPROM.get(EEPROM_ADDR, stats);
 
   // Eerste keer of corrupte data
-  if (stats.totalSeconds == 0xFFFFFFFF) {
-    stats.totalSeconds = 0;
+  if (stats.totalMeasurements == 0xFFFFFFFF) {
+    stats.totalMeasurements = 0;
     stats.currentSum_mA = 0.0;
   }
 
-  Serial.print("Herstelde runtime (s): ");
-  Serial.println(stats.totalSeconds);
+  Serial.print("Herstelde runtime (ms): ");
+  Serial.println(stats.totalMeasurements);
 }
 
 // Functie om cumulatieve stroomgegevens naar EEPROM te schrijven (zo blijft het totaal behouden bij een reset of stroomuitval)
@@ -117,7 +118,7 @@ void setup() {
   // eventueel oude EEPROM-statistieken inladen
   loadStatsFromEEPROM();
 
-  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS); // Initialiseer de LED-strip
+  FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS); // Initialiseer de LED-strip
   Serial.begin(9600);
 
   while(!Serial);
@@ -125,7 +126,7 @@ void setup() {
   Serial.println();
   // INA219 initialiseren, kijken of hij reageert, en kalibreren
   while(ina219.begin() != true) {
-      Serial.println("INA219 begin faild");
+      Serial.println("INA219 begin failed");
       delay(2000);
   }
   ina219.linearCalibrate(ina219Reading_mA, extMeterReading_mA);
@@ -153,92 +154,111 @@ void setup() {
 
 void loop() {
   // Bereken huidige "gesimuleerde" tijd sinds dagStart
-  unsigned long verlopen = millis() + dayStart;
-  
-  // Bereken huidige dag in het schema
-  int currentDay = (verlopen / DAY_DURATION) % NUM_DAYS;
-  // Zorg dat het “een dag” wordt herhaald
-  unsigned long timeInDay = verlopen % dayDuration;
 
-    // Bereken gesimuleerde uren, minuten en seconden
-  unsigned long totalSeconds = timeInDay / 1000;
-  int hours = totalSeconds / 3600;
-  int minutes = (totalSeconds % 3600) / 60;
-  int seconds = totalSeconds % 60;
+  currentMillis = millis();
 
-  // Print tijd naar Serial
-  Serial.print("Dag ");
-  Serial.print(currentDay);
-  Serial.print("Tijd: ");
-  if(hours < 10) Serial.print("0");
-  Serial.print(hours);
-  Serial.print(":");
-  if(minutes < 10) Serial.print("0");
-  Serial.print(minutes);
-  Serial.print(":");
-  if(seconds < 10) Serial.print("0");
-  Serial.println(seconds);
+  if (currentMillis - previousMillisColorChange >= INTERVAL_COLOR_CHANGE) {
+    previousMillisColorChange = currentMillis;
 
-  // Check welk schema actief is
-  // Loop door het schema en vind de laatste gebeurtenis die is gepasseerd
-  for (int i = 0; i < numEvents; i++) {
-    if (schedule[i].day == currentDay)
-    {
-      unsigned long eventTime = (schedule[i].hour * 3600UL + schedule[i].minute * 60UL) * 1000UL;
-      if (timeInDay >= eventTime) {
-        currentColor = schedule[i];
+    unsigned long verlopen = currentMillis + dayStart;
+    
+    // Bereken huidige dag in het schema
+    int currentDay = (verlopen / DAY_DURATION) % NUM_DAYS;
+    // Zorg dat het “een dag” wordt herhaald
+    unsigned long timeInDay = verlopen % dayDuration;
+
+      // Bereken gesimuleerde uren, minuten en seconden
+    unsigned long totalSeconds = timeInDay / 1000;
+    int hours = totalSeconds / 3600;
+    int minutes = (totalSeconds % 3600) / 60;
+    int seconds = totalSeconds % 60;
+
+    // Print tijd naar Serial
+    Serial.print("Dag ");
+    Serial.print(currentDay);
+    Serial.print("Tijd: ");
+    if(hours < 10) Serial.print("0");
+    Serial.print(hours);
+    Serial.print(":");
+    if(minutes < 10) Serial.print("0");
+    Serial.print(minutes);
+    Serial.print(":");
+    if(seconds < 10) Serial.print("0");
+    Serial.println(seconds);
+
+    // Check welk schema actief is
+    // Loop door het schema en vind de laatste gebeurtenis die is gepasseerd
+    for (int i = 0; i < numEvents; i++) {
+      if (schedule[i].day == currentDay)
+      {
+        unsigned long eventTime = (schedule[i].hour * 3600UL + schedule[i].minute * 60UL) * 1000UL;
+        if (timeInDay >= eventTime) {
+          currentColor = schedule[i];
+        }
       }
     }
+
+    // Zet LED naar huidige kleur
+    for (int i = 0; i < NUM_LEDS; i++)
+    {
+      leds[i] = CRGB(currentColor.r, currentColor.g, currentColor.b);
+    }
+    FastLED.show();
   }
 
-  // Zet LED naar huidige kleur
-  for (int i = 0; i < NUM_LEDS; i++)
-  {
-    leds[i] = CRGB(currentColor.r, currentColor.g, currentColor.b);
-  }
-  FastLED.show();
+  currentMillis = millis();
 
-  // Print stroommetingen naar Serial, ter controle van de werking van de INA219
-  Serial.print("BusVoltage:   ");
-  Serial.print(ina219.getBusVoltage_V(), 2);
-  Serial.println("V");
-  Serial.print("ShuntVoltage: ");
-  Serial.print(ina219.getShuntVoltage_mV(), 3);
-  Serial.println("mV");
-  Serial.print("Current:      ");
-  Serial.print(ina219.getCurrent_mA(), 1);
-  Serial.println("mA");
-  Serial.print("Power:        ");
-  Serial.print(ina219.getPower_mW(), 1);
-  Serial.println("mW");
-  Serial.println("");
+  if (currentMillis - previousMillisPrintMeasurement >= INTERVAL_PRINT_MEAS) {
+    previousMillisPrintMeasurement = currentMillis;
+
+    // Print stroommetingen naar Serial, ter controle van de werking van de INA219
+    Serial.print("BusVoltage:   ");
+    Serial.print(ina219.getBusVoltage_V(), 2);
+    Serial.println("V");
+    Serial.print("ShuntVoltage: ");
+    Serial.print(ina219.getShuntVoltage_mV(), 3);
+    Serial.println("mV");
+    Serial.print("Current:      ");
+    Serial.print(ina219.getCurrent_mA(), 1);
+    Serial.println("mA");
+    Serial.print("Power:        ");
+    Serial.print(ina219.getPower_mW(), 1);
+    Serial.println("mW");
+    Serial.println("");
+
+  }
+
+
 
   //EEPROM-deel
-  unsigned long nowMillis = millis();
+  currentMillis = millis();
 
   // 1x per seconde meten en cumulatieve stroomgegevens bijwerken
-  if (nowMillis - lastSampleMillis >= SAMPLE_INTERVAL) {
-    lastSampleMillis = nowMillis;
+  if (currentMillis - previousMillisCurrentSample >= INTERVAL_CURRENT_SAMPLE) {
+    previousMillisCurrentSample = currentMillis;
 
     float current_mA = ina219.getCurrent_mA();
 
     stats.currentSum_mA += current_mA;
-    stats.totalSeconds++;
+    stats.totalMeasurements++;
   }
 
-  // 1x per minuut cumulatieve stroomgegevens naar EEPROM schrijven
-  if (nowMillis - lastEEPROMWriteMillis >= EEPROM_INTERVAL) {
-    lastEEPROMWriteMillis = nowMillis;
+  // 1x per 10 minuut cumulatieve stroomgegevens naar EEPROM schrijven
+  currentMillis = millis();
+  if (currentMillis - previousMillisWriteEeprom >= INTERVAL_WRITE_EEPROM) {
+    previousMillisWriteEeprom = currentMillis;
     saveStatsToEEPROM();
   }
 
   // Gemiddelde stroom berekenen en printen
-  if (stats.totalSeconds > 0) {
-    double avgCurrent = stats.currentSum_mA / stats.totalSeconds;
+  currentMillis = millis();
+  if (currentMillis - previousMillisPrintAVGCurrent >= INTERVAL_PRINT_AVG_CURRENT) {
+    if (stats.totalMeasurements > 0) {
+      double avgCurrent = stats.currentSum_mA / stats.totalMeasurements;
 
-    Serial.print("Gemiddelde stroom (mA): ");
-    Serial.println(avgCurrent, 2);
+      Serial.print("Gemiddelde stroom (mA): ");
+      Serial.println(avgCurrent, 2);
+    }
   }
-
-  delay(500);
 }
+
